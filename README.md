@@ -9,26 +9,6 @@ the original tool.
 
 ## Enhancements over standard goyacc
 
-### Fast-append optimization
-
-The `-f` flag enables a performance optimization for grammar rules that use
-`append($$, ...)` patterns in their reduction actions. Instead of going
-through an interface type assertion on every append, the generated code uses
-`unsafe.Pointer` to access the underlying slice directly:
-
-```go
-// Without fast-append: type assertion on every reduction
-yyVAL.union = append(yyDollar[1].exprUnion(), yyDollar[2].exprUnion())
-
-// With fast-append: direct slice pointer manipulation
-yyySLICE := (*[]Expr)(yyIaddr(yyVAL.union))
-*yyySLICE = append(*yyySLICE, yyDollar[2].exprUnion())
-```
-
-This avoids repeated boxing/unboxing of slice values through the `any`
-interface in the parser's union type, which can meaningfully reduce
-allocations in grammars with many list production rules.
-
 ### Discriminated union via `any`
 
 The original goyacc maps `%union` members directly to struct fields in
@@ -40,8 +20,29 @@ them, which significantly reduces the size of the parser stack for
 grammars with many types. The accessor methods preserve compile-time
 type safety.
 
-This is also what makes the fast-append optimization possible — the
-`any` interface is what `$$Iaddr` reaches through via `unsafe.Pointer`.
+### Fast-append optimization
+
+The trade-off of the `any` union is that storing a value requires
+boxing it into the interface, and retrieving it requires a type
+assertion. For grammar rules that build up slices with
+`append($$, ...)`, this boxing happens on every reduction.
+
+The `-f` flag enables an optimization that bypasses the interface for
+these append patterns. Instead of going through a type assertion, the
+generated code uses `unsafe.Pointer` to access the underlying slice
+directly:
+
+```go
+// Without fast-append: box/unbox on every reduction
+yyVAL.union = append(yyDollar[1].exprUnion(), yyDollar[2].exprUnion())
+
+// With fast-append: direct slice pointer manipulation
+yyySLICE := (*[]Expr)(yyIaddr(yyVAL.union))
+*yyySLICE = append(*yyySLICE, yyDollar[2].exprUnion())
+```
+
+This can meaningfully reduce allocations in grammars with many list
+production rules.
 
 ### `%struct` directive
 
