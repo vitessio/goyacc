@@ -23,9 +23,10 @@ type safety.
 ### Fast-append optimization
 
 The trade-off of the `any` union is that storing a value requires
-boxing it into the interface, and retrieving it requires a type
-assertion. For grammar rules that build up slices with
-`append($$, ...)`, this boxing happens on every reduction.
+boxing it into the interface. For types larger than a pointer (such as
+slice headers, which are 3 words), this boxing allocates on the heap.
+For grammar rules that build up slices with `append($$, ...)`, this
+allocation happens on every reduction.
 
 The `-f` flag enables an optimization that bypasses the interface for
 these append patterns. Instead of going through a type assertion, the
