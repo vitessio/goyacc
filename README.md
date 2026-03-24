@@ -70,9 +70,19 @@ which supports combined short flags (e.g., `-fo sql.go` combines `-f` and
 
 ## Installation
 
+As a standalone binary:
+
 ```bash
 go install github.com/vitessio/goyacc@latest
 ```
+
+As a [tool dependency](https://go.dev/doc/modules/managing-dependencies#tools) in your module:
+
+```bash
+go get -tool github.com/vitessio/goyacc@latest
+```
+
+Then invoke it with `go tool goyacc` or `go run github.com/vitessio/goyacc`.
 
 ## Usage
 
