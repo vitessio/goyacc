@@ -3482,7 +3482,7 @@ var yaccpar string // will be processed version of yaccpartext: s/$$/prefix/g
 const yaccpartext = `
 /*	parser for yacc output	*/
 
-var (
+const (
 	$$Debug        = 0
 	$$ErrorVerbose = false
 )
