@@ -1176,7 +1176,7 @@ func typeinfo() {
 		tt := gotypes[member]
 
 		// Getter: read from uintptr data via unsafe cast.
-		fmt.Fprintf(ftable, "\nfunc (st *%sSymType) %sUnion() %s {\n", prefix, member, tt.typename)
+		fmt.Fprintf(ftable, "\nfunc (st *%sSymType) %s() %s {\n", prefix, member, tt.typename)
 		fmt.Fprintf(ftable, "\treturn *(*%s)(__yyunsafe__.Pointer(&st.data))\n", tt.typename)
 		fmt.Fprintf(ftable, "}\n")
 
@@ -1492,7 +1492,7 @@ loop:
 			*unionMember = typeset[tok]
 		}
 	} else if *unionType == "" {
-		fmt.Fprintf(fcode, "%sVAL.%sUnion()", prefix, typeset[tok])
+		fmt.Fprintf(fcode, "%sVAL.%s()", prefix, typeset[tok])
 	} else {
 		fmt.Fprintf(fcode, "%sLOCAL", prefix)
 	}
@@ -1606,7 +1606,7 @@ loop:
 				if !ok {
 					errorf("missing Go type information for %s", typeset[tok])
 				}
-				fmt.Fprintf(fcode, ".%sUnion()", typeset[tok])
+				fmt.Fprintf(fcode, ".%s()", typeset[tok])
 			}
 			continue loop
 
