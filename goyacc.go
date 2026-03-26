@@ -379,7 +379,7 @@ type Error struct {
 	msg    string
 }
 
-var errors []Error
+var customErrors []Error
 
 type Row struct {
 	actions       []int
@@ -485,7 +485,7 @@ outer:
 			if gettok() != IDENTIFIER {
 				errorf("bad syntax in %%error")
 			}
-			errors = append(errors, Error{lno, tokens, tokname})
+			customErrors = append(customErrors, Error{lno, tokens, tokname})
 
 		case TYPEDEF:
 			t = gettok()
@@ -2326,7 +2326,7 @@ func output() {
 	}
 	var actions []int
 
-	if len(errors) > 0 {
+	if len(customErrors) > 0 {
 		stateTable = make([]Row, nstate)
 	}
 
@@ -2548,7 +2548,7 @@ func wrstate(i int) {
 	var j0, j1, u int
 	var pp, qq int
 
-	if len(errors) > 0 {
+	if len(customErrors) > 0 {
 		actions := slices.Clone(temp1)
 		defaultAction := ERRCODE
 		if lastred != 0 {
@@ -3119,7 +3119,7 @@ func others() {
 	fmt.Fprintf(ftable, "\ttoken int\n")
 	fmt.Fprintf(ftable, "\tmsg   string\n")
 	fmt.Fprintf(ftable, "}{\n")
-	for _, error := range errors {
+	for _, error := range customErrors {
 		lineno = error.lineno
 		state, token := runMachine(error.tokens)
 		fmt.Fprintf(ftable, "\t{%v, %v, %s},\n", state, token, error.msg)
