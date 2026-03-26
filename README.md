@@ -40,20 +40,6 @@ reduction. The `ptrs` array keeps pointer-containing words visible to
 the GC. `yySymType` can shrink dramatically (e.g. 136 → 40 bytes),
 reducing stack copy cost on every parser push/pop operation.
 
-### Fast-append optimization
-
-For grammar rules that build up slices with `append($$, ...)`, the
-generated code accesses the underlying slice directly via
-`unsafe.Pointer(&yyVAL.data)` rather than allocating a new slice header:
-
-```go
-yySLICE := (*[]Expr)(__yyunsafe__.Pointer(&yyVAL.data))
-*yySLICE = append(*yySLICE, yyDollar[2].expr())
-```
-
-This optimization is always enabled and eliminates per-reduction heap
-allocations for slice-typed grammar symbols.
-
 ### Custom error messages
 
 Supports `// error: "message"` comments in grammar rules to provide
@@ -113,8 +99,8 @@ This tool's lineage:
 
 1. **Inferno `iyacc/yacc.c`** — the original C implementation
 2. **Go `cmd/yacc`** — ported to Go by the Go Authors
-3. **This fork** — enhanced by the Vitess Authors with fast-append, typed
-   unions, and custom error messages
+3. **This fork** — enhanced by the Vitess Authors with typed unions and
+   custom error messages
 
 ## License
 
