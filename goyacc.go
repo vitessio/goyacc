@@ -48,7 +48,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"regexp"
@@ -1420,7 +1422,7 @@ loop:
 			lvalue = true
 			if allowFastAppend && *unionType == "" {
 				peek, err := finput.Peek(16)
-				if err != nil {
+				if err != nil && !errors.Is(err, io.EOF) {
 					errorf("failed to scan forward: %v", err)
 				}
 				match := fastAppendRe.Find(peek)
