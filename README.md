@@ -67,8 +67,7 @@ expected tokens.
 ### POSIX-style flags
 
 Uses [pflag](https://github.com/spf13/pflag) for command-line parsing,
-which supports combined short flags (e.g., `-fo sql.go` combines `-f` and
-`-o sql.go`).
+which supports POSIX-style combined short flags.
 
 ## Installation
 
