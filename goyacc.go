@@ -174,11 +174,10 @@ var (
 var writtenImports bool // output file has recorded an import of "fmt"
 
 var (
-	oflag           string // -o [y.go]		- y.go file
-	vflag           string // -v [y.output]	- y.output file
-	lflag           bool   // -l			- disable line directives
-	prefix          string // name prefix for identifiers, default yy
-	allowFastAppend bool
+	oflag  string // -o [y.go]		- y.go file
+	vflag  string // -v [y.output]	- y.output file
+	lflag  bool   // -l			- disable line directives
+	prefix string // name prefix for identifiers, default yy
 )
 
 func init() {
@@ -186,7 +185,6 @@ func init() {
 	pflag.StringVarP(&prefix, "prefix", "p", "yy", "name prefix to use in generated code")
 	pflag.StringVarP(&vflag, "verbose-output", "v", "y.output", "create parsing tables")
 	pflag.BoolVarP(&lflag, "disable-line-directives", "l", false, "disable line directives")
-	pflag.BoolVarP(&allowFastAppend, "fast-append", "f", false, "enable fast-append optimization")
 }
 
 var initialstacksize = 16
@@ -1256,9 +1254,7 @@ func emitcode(code []rune, lineno int) {
 		if !writtenImports && isPackageClause(line) {
 			fmt.Fprintln(ftable, `import (`)
 			fmt.Fprintln(ftable, `__yyfmt__ "fmt"`)
-			if allowFastAppend {
-				fmt.Fprintln(ftable, `__yyunsafe__ "unsafe"`)
-			}
+			fmt.Fprintln(ftable, `__yyunsafe__ "unsafe"`)
 			fmt.Fprintln(ftable, `)`)
 			if !lflag {
 				fmt.Fprintf(ftable, "//line %v:%v\n\t\t", infile, lineno+i)
@@ -1420,7 +1416,7 @@ loop:
 
 		case '=':
 			lvalue = true
-			if allowFastAppend && *unionType == "" {
+			if *unionType == "" {
 				peek, err := finput.Peek(16)
 				if err != nil && !errors.Is(err, io.EOF) {
 					errorf("failed to scan forward: %v", err)
@@ -3135,10 +3131,8 @@ func others() {
 		ch = getrune(finput)
 	}
 
-	if allowFastAppend {
-		fastAppendHelper := strings.ReplaceAll(fastAppendHelperText, "$$", prefix)
-		fmt.Fprint(ftable, fastAppendHelper)
-	}
+	fastAppendHelper := strings.ReplaceAll(fastAppendHelperText, "$$", prefix)
+	fmt.Fprint(ftable, fastAppendHelper)
 
 	// copy yaccpar
 	if !lflag {

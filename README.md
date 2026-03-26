@@ -22,28 +22,18 @@ type safety.
 
 ### Fast-append optimization
 
-The trade-off of the `any` union is that storing a value requires
-boxing it into the interface. For types larger than a pointer (such as
-slice headers, which are 3 words), this boxing allocates on the heap.
-For grammar rules that build up slices with `append($$, ...)`, this
-allocation happens on every reduction.
-
-The `-f` flag enables an optimization that bypasses the interface for
-these append patterns. Instead of going through a type assertion, the
+For grammar rules that build up slices with `append($$, ...)`, the
 generated code uses `unsafe.Pointer` to access the underlying slice
-directly:
+directly rather than boxing and unboxing through an interface:
 
 ```go
-// Without fast-append: box/unbox on every reduction
-yyVAL.union = append(yyDollar[1].exprUnion(), yyDollar[2].exprUnion())
-
-// With fast-append: direct slice pointer manipulation
+// Direct slice pointer manipulation — no interface boxing
 yyySLICE := (*[]Expr)(yyIaddr(yyVAL.union))
 *yyySLICE = append(*yyySLICE, yyDollar[2].exprUnion())
 ```
 
-This can meaningfully reduce allocations in grammars with many list
-production rules.
+This optimization is always enabled and can meaningfully reduce
+allocations in grammars with many list production rules.
 
 ### `%struct` directive
 
@@ -98,12 +88,11 @@ goyacc [flags] grammar.y
 | `--prefix` | `-p` | `yy` | Name prefix for generated identifiers |
 | `--verbose-output` | `-v` | `y.output` | Verbose parsing tables output file |
 | `--disable-line-directives` | `-l` | `false` | Disable line directives in generated code |
-| `--fast-append` | `-f` | `false` | Enable fast-append optimization |
 
 ### Example
 
 ```bash
-goyacc -fo sql.go sql.y
+goyacc -o sql.go sql.y
 ```
 
 The generated output is valid Go source but is not formatted. Callers

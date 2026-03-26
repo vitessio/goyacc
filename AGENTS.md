@@ -43,7 +43,7 @@ The upstream source is [`cmd/goyacc`](https://cs.opensource.google/go/x/tools/+/
 
 **Discriminated union** (`%union`): Instead of a struct with one field per type, generates a single `union any` field plus typed accessor methods (e.g., `exprUnion() Expr`). Reduces parser stack size.
 
-**Fast-append** (`-f`): For rules of the form `$$ = append($1, $2)`, bypasses the interface box/unbox by using `unsafe.Pointer` directly into the `union` field. Eliminates per-reduction heap allocations for slice-typed grammar symbols.
+**Fast-append**: For rules of the form `$$ = append($1, $2)`, bypasses the interface box/unbox by using `unsafe.Pointer` directly into the `union` field. Eliminates per-reduction heap allocations for slice-typed grammar symbols. Always enabled.
 
 **`%struct` directive**: Members declared with `%struct` become direct fields on `yySymType` (original behavior); `%union` members go through the `any` accessor path. Mix both to balance stack size vs. direct access.
 
