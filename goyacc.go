@@ -2215,35 +2215,35 @@ func writem(pp Pitem) string {
 	var i int
 
 	p := pp.prod
-	q := chcopy(nontrst[prdptr[pp.prodno][0]-NTBASE].name) + ": "
+	var q strings.Builder
+	q.WriteString(chcopy(nontrst[prdptr[pp.prodno][0]-NTBASE].name))
+	q.WriteString(": ")
 	npi := pp.off
 
 	pi := aryeq(p, prdptr[pp.prodno])
 
-	var qSb2219 strings.Builder
 	for {
 		c := ' '
 		if pi == npi {
 			c = '.'
 		}
-		qSb2219.WriteRune(c)
+		q.WriteByte(byte(c))
 
 		i = p[pi]
 		pi++
 		if i <= 0 {
 			break
 		}
-		qSb2219.WriteString(chcopy(symnam(i)))
+		q.WriteString(chcopy(symnam(i)))
 	}
-	q += qSb2219.String()
 
 	// an item calling for a reduction
 	i = p[npi]
 	if i < 0 {
-		q += fmt.Sprintf("    (%v)", -i)
+		fmt.Fprintf(&q, "    (%v)", -i)
 	}
 
-	return q
+	return q.String()
 }
 
 // pack state i from temp1 into amem
@@ -3258,18 +3258,18 @@ func osummary() {
 
 // copies and protects "'s in q
 func chcopy(q string) string {
-	s := ""
+	var s strings.Builder
 	i := 0
 	j := 0
-	var sSb3222 strings.Builder
 	for i = 0; i < len(q); i++ {
 		if q[i] == '"' {
-			sSb3222.WriteString(q[j:i] + "\\")
+			s.WriteString(q[j:i])
+			s.WriteByte('\\')
 			j = i
 		}
 	}
-	s += sSb3222.String()
-	return s + q[j:i]
+	s.WriteString(q[j:i])
+	return s.String()
 }
 
 func usage() {
