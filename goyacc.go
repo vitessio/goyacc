@@ -52,6 +52,7 @@ import (
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2529,7 +2530,7 @@ func wrstate(i int) {
 	var pp, qq int
 
 	if len(errors) > 0 {
-		actions := append([]int(nil), temp1...)
+		actions := slices.Clone(temp1)
 		defaultAction := ERRCODE
 		if lastred != 0 {
 			defaultAction = -lastred
