@@ -144,14 +144,20 @@ func ASSOC(i int) int { return i & 3 }
 
 func PLEVEL(i int) int { return (i >> 4) & 0o77 }
 
-func TYPE(i int) int { return (i >> 10) & 0o77 }
+func TYPE(i int) int { return (i >> 10) & 0xFF }
 
 // macros for setting associativity and precedence levels
 func SETASC(i, j int) int { return i | j }
 
 func SETPLEV(i, j int) int { return i | (j << 4) }
 
-func SETTYPE(i, j int) int { return i | (j << 10) }
+func SETTYPE(i, j int) int {
+	if j > 0xFF {
+		fmt.Fprintf(stderr, "goyacc: type value %d too large\n", j)
+		exit(1)
+	}
+	return i | (j << 10)
+}
 
 // I/O descriptors
 var (
