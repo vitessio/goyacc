@@ -9,41 +9,53 @@ the original tool.
 
 ## Enhancements over standard goyacc
 
-### Discriminated union via `any`
+### Discriminated `unsafe.Pointer` union
 
 The original goyacc maps `%union` members directly to struct fields in
-`yySymType`. This fork replaces that with a single `union any` field
-and generates typed accessor methods for each member (e.g.,
-`exprUnion() Expr`). This means each `yySymType` value holds exactly
-one semantic value at a time instead of allocating space for all of
-them, which significantly reduces the size of the parser stack for
-grammars with many types. The accessor methods preserve compile-time
-type safety.
+`yySymType`, making the struct as large as the sum of all member types.
+This fork replaces that layout with a compact discriminated union that
+mimics how a C `union` works: all member types share the same block of
+memory, with the largest member determining the allocation size.
+
+```go
+type yySymType struct {
+    data yyData  // [N]uintptr — raw storage, sized to largest member
+    ptrs yyPtrs  // [M]unsafe.Pointer — GC keepalive for pointer words
+    yys  int
+}
+```
+
+The `data` array size and the pointer-word layout for each member are
+inferred automatically at generation time using `go/packages`. Typed
+accessor and setter methods are generated for each member:
+
+```go
+func (st *yySymType) exprUnion() Expr { ... }      // getter
+func (st *yySymType) setexpr(v Expr)  { ... }      // setter
+```
+
+All reads and writes go through `unsafe.Pointer` casts into `data`,
+eliminating interface boxing (`convTslice`/`convT`) on every grammar
+reduction. The `ptrs` array keeps pointer-containing words visible to
+the GC. `yySymType` can shrink dramatically (e.g. 136 → 40 bytes),
+reducing stack copy cost on every parser push/pop operation.
+
+Both `%union` and `%struct` directives populate the same union; the
+distinction between them no longer affects the generated layout.
 
 ### Fast-append optimization
 
 For grammar rules that build up slices with `append($$, ...)`, the
-generated code uses `unsafe.Pointer` to access the underlying slice
-directly rather than boxing and unboxing through an interface:
+generated code accesses the underlying slice directly via
+`unsafe.Pointer(&yyVAL.data)` rather than allocating a new slice header:
 
 ```go
-// Direct slice pointer manipulation — no interface boxing
-yyySLICE := (*[]Expr)(yyIaddr(yyVAL.union))
-*yyySLICE = append(*yyySLICE, yyDollar[2].exprUnion())
+yySLICE := (*[]Expr)(__yyunsafe__.Pointer(&yyVAL.data))
+*yySLICE = append(*yySLICE, yyDollar[2].exprUnion())
 ```
 
-This optimization is always enabled and can meaningfully reduce
-allocations in grammars with many list production rules.
-
-### `%struct` directive
-
-In addition to `%union`, this fork adds a `%struct` directive. Members
-declared with `%struct` become direct fields on `yySymType` (like the
-original `%union` behavior), while `%union` members go through the
-`any` field with accessors. This allows grammars to use both
-approaches: `%struct` for small, frequently-accessed values that
-benefit from direct field access, and `%union` for the larger set of
-semantic types that benefit from the smaller stack footprint.
+This optimization is always enabled and eliminates per-reduction heap
+allocations for slice-typed grammar symbols.
 
 ### Custom error messages
 

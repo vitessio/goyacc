@@ -167,7 +167,6 @@ var (
 	stderr  *bufio.Writer
 	ftable  *bufio.Writer     // y.go file
 	fcode   = &bytes.Buffer{} // saved code
-	ftypes  = &bytes.Buffer{} // saved type definitions
 	foutput *bufio.Writer     // y.output file
 )
 
@@ -395,6 +394,21 @@ const EOF = -1
 func main() {
 	setup() // initialize and read productions
 
+	// Infer the data array size and pointer layout for the discriminated union.
+	if len(gotypes) > 0 {
+		dataWords, maxPtrs, layouts, err := inferUnionLayout()
+		if err != nil {
+			errorf("failed to infer union layout: %v", err)
+		}
+		unionDataSize = dataWords
+		unionPtrSize = maxPtrs
+		for member, layout := range layouts {
+			if gt, ok := gotypes[member]; ok {
+				gt.ptrWords = layout.ptrWords
+			}
+		}
+	}
+
 	tbitset = (ntokens + 32) / 32
 	cpres()  // make table of which productions yield a given nonterminal
 	cempty() // make a table of which nonterminals can match the empty string
@@ -525,10 +539,10 @@ outer:
 			continue
 
 		case UNION:
-			parsetypes(true)
+			parsetypes()
 
 		case STRUCT:
-			parsetypes(false)
+			parsetypes()
 
 		case LEFT, BINARY, RIGHT, TERM:
 			// nonzero means new prec. and assoc.
@@ -672,15 +686,23 @@ outer:
 			fmt.Fprintf(fcode, "\n\t\t%sDollar = %sS[%spt-%v:%spt+1]", prefix, prefix, prefix, mem-1, prefix)
 
 			var act bytes.Buffer
-			var unionType string
-			cpyact(&act, curprod, mem, &unionType)
+			var unionType, unionMember string
+			var usedFastAppend bool
+			cpyact(&act, curprod, mem, &unionType, &unionMember, &usedFastAppend)
 
 			if unionType != "" {
 				fmt.Fprintf(fcode, "\n\t\tvar %sLOCAL %s", prefix, unionType)
 			}
 			fcode.Write(act.Bytes())
+			if usedFastAppend {
+				// After fast-append, the slice data pointer may have changed.
+				// Update ptrs[0] by reading the first word of the data array
+				// as unsafe.Pointer. We use &data (not data[0]) to avoid
+				// a uintptr→unsafe.Pointer conversion that checkptr rejects.
+				fmt.Fprintf(fcode, "\n\t\t%sVAL.ptrs[0] = *(*__yyunsafe__.Pointer)(__yyunsafe__.Pointer(&%sVAL.data))", prefix, prefix)
+			}
 			if unionType != "" {
-				fmt.Fprintf(fcode, "\n\t\t%sVAL.union = %sLOCAL", prefix, prefix)
+				fmt.Fprintf(fcode, "\n\t\t%sVAL.set%s(%sLOCAL)", prefix, unionMember, prefix)
 			}
 
 			// action within rule...
@@ -1118,45 +1140,73 @@ const (
 
 type gotypeinfo struct {
 	typename string
-	union    bool
+	ptrWords []int // word offsets containing pointers (populated by inferUnionLayout)
 }
 
 var gotypes = make(map[string]*gotypeinfo)
+
+var (
+	unionDataSize int // number of uintptr words for raw data
+	unionPtrSize  int // number of unsafe.Pointer words for GC keepalive
+)
 
 func typeinfo() {
 	if !lflag {
 		fmt.Fprintf(ftable, "\n//line %v:%v\n", infile, lineno)
 	}
-	fmt.Fprintf(ftable, "type %sSymType struct {", prefix)
-	for _, tt := range gotypes {
-		if tt.union {
-			fmt.Fprintf(ftable, "\n\tunion any")
-			break
-		}
+	fmt.Fprintf(ftable, "type %sData = [%d]uintptr\n", prefix, unionDataSize)
+	fmt.Fprintf(ftable, "var %sZeroData %sData\n", prefix, prefix)
+	if unionPtrSize > 0 {
+		fmt.Fprintf(ftable, "type %sPtrs = [%d]__yyunsafe__.Pointer\n", prefix, unionPtrSize)
+		fmt.Fprintf(ftable, "var %sZeroPtrs %sPtrs\n", prefix, prefix)
 	}
-	ftable.Write(ftypes.Bytes())
+	fmt.Fprint(ftable, "\n")
+
+	fmt.Fprintf(ftable, "type %sSymType struct {", prefix)
+	fmt.Fprintf(ftable, "\n\tdata %sData", prefix)
+	if unionPtrSize > 0 {
+		fmt.Fprintf(ftable, "\n\tptrs %sPtrs // GC keepalive for pointers in data", prefix)
+	}
 	fmt.Fprintf(ftable, "\n\tyys int")
 	fmt.Fprintf(ftable, "\n}\n\n")
 
+	// All types get unsafe-cast accessors + setters.
 	var sortedTypes []string
-	for member, tt := range gotypes {
-		if tt.union {
-			sortedTypes = append(sortedTypes, member)
-		}
+	for member := range gotypes {
+		sortedTypes = append(sortedTypes, member)
 	}
 	sort.Strings(sortedTypes)
 
 	for _, member := range sortedTypes {
 		tt := gotypes[member]
+
+		// Getter: read from uintptr data via unsafe cast.
 		fmt.Fprintf(ftable, "\nfunc (st *%sSymType) %sUnion() %s {\n", prefix, member, tt.typename)
-		fmt.Fprintf(ftable, "\tv, _ := st.union.(%s)\n", tt.typename)
-		fmt.Fprintf(ftable, "\treturn v\n")
+		fmt.Fprintf(ftable, "\treturn *(*%s)(__yyunsafe__.Pointer(&st.data))\n", tt.typename)
+		fmt.Fprintf(ftable, "}\n")
+
+		// Setter: write to uintptr data, then copy pointer words to ptrs for GC.
+		fmt.Fprintf(ftable, "\nfunc (st *%sSymType) set%s(v %s) {\n", prefix, member, tt.typename)
+		fmt.Fprintf(ftable, "\tst.data = %sZeroData\n", prefix)
+		if unionPtrSize > 0 {
+			fmt.Fprintf(ftable, "\tst.ptrs = %sZeroPtrs\n", prefix)
+		}
+		fmt.Fprintf(ftable, "\t*(*%s)(__yyunsafe__.Pointer(&st.data)) = v\n", tt.typename)
+		// Copy pointer words from the original value v (not from data) to
+		// avoid uintptr→unsafe.Pointer conversion that checkptr rejects.
+		if len(tt.ptrWords) > 0 {
+			maxWord := tt.ptrWords[len(tt.ptrWords)-1]
+			fmt.Fprintf(ftable, "\tvp := (*[%d]__yyunsafe__.Pointer)(__yyunsafe__.Pointer(&v))\n", maxWord+1)
+			for i, wordIdx := range tt.ptrWords {
+				fmt.Fprintf(ftable, "\tst.ptrs[%d] = vp[%d]\n", i, wordIdx)
+			}
+		}
 		fmt.Fprintf(ftable, "}\n")
 	}
 }
 
 // copy the union declaration to the output, and the define file if present
-func parsetypes(union bool) {
+func parsetypes() {
 	var member, typ bytes.Buffer
 	state := startUnion
 
@@ -1172,10 +1222,6 @@ out:
 			if state == readingType {
 				gotypes[member.String()] = &gotypeinfo{
 					typename: typ.String(),
-					union:    union,
-				}
-				if !union {
-					fmt.Fprintf(ftypes, "\n\t%s %s", member.Bytes(), typ.Bytes())
 				}
 				member.Reset()
 				typ.Reset()
@@ -1384,7 +1430,7 @@ l1:
 
 var fastAppendRe = regexp.MustCompile(`\s+append\(\$[$1],`)
 
-func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *string) {
+func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *string, unionMember *string, usedFastAppend *bool) {
 	if ntypes == 0 {
 		fmt.Fprintf(fcode, "%sVAL", prefix)
 		return
@@ -1396,10 +1442,6 @@ func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *strin
 	ti, ok := gotypes[typeset[tok]]
 	if !ok {
 		errorf("missing Go type information for %s", typeset[tok])
-	}
-	if !ti.union {
-		fmt.Fprintf(fcode, "%sVAL.%s", prefix, typeset[tok])
-		return
 	}
 
 	var buf bytes.Buffer
@@ -1443,11 +1485,17 @@ loop:
 	}
 
 	if fastAppend {
-		fmt.Fprintf(fcode, "\t%sSLICE := (*%s)(%sIaddr(%sVAL.union))\n", prefix, ti.typename, prefix, prefix)
+		fmt.Fprintf(fcode, "\t%sSLICE := (*%s)(__yyunsafe__.Pointer(&%sVAL.data))\n", prefix, ti.typename, prefix)
 		fmt.Fprintf(fcode, "\t*%sSLICE = append(*%sSLICE, ", prefix, prefix)
+		if usedFastAppend != nil {
+			*usedFastAppend = true
+		}
 	} else if lvalue {
 		fmt.Fprintf(fcode, "%sLOCAL", prefix)
 		*unionType = ti.typename
+		if unionMember != nil {
+			*unionMember = typeset[tok]
+		}
 	} else if *unionType == "" {
 		fmt.Fprintf(fcode, "%sVAL.%sUnion()", prefix, typeset[tok])
 	} else {
@@ -1457,7 +1505,7 @@ loop:
 }
 
 // copy action to the next ; or closing }
-func cpyact(fcode *bytes.Buffer, curprod []int, max int, unionType *string) {
+func cpyact(fcode *bytes.Buffer, curprod []int, max int, unionType *string, unionMember *string, usedFastAppend *bool) {
 	if !lflag {
 		fmt.Fprintf(fcode, "\n//line %v:%v", infile, lineno)
 	}
@@ -1496,7 +1544,7 @@ loop:
 				c = getrune(finput)
 			}
 			if c == '$' {
-				cpyyvalaccess(fcode, curprod, tok, unionType)
+				cpyyvalaccess(fcode, curprod, tok, unionType, unionMember, usedFastAppend)
 				continue loop
 			}
 			if c == '-' {
@@ -1559,15 +1607,11 @@ loop:
 				if tok < 0 {
 					tok, _ = fdtype(curprod[j])
 				}
-				ti, ok := gotypes[typeset[tok]]
+				_, ok := gotypes[typeset[tok]]
 				if !ok {
 					errorf("missing Go type information for %s", typeset[tok])
 				}
-				if ti.union {
-					fmt.Fprintf(fcode, ".%sUnion()", typeset[tok])
-				} else {
-					fmt.Fprintf(fcode, ".%s", typeset[tok])
-				}
+				fmt.Fprintf(fcode, ".%sUnion()", typeset[tok])
 			}
 			continue loop
 
@@ -3131,9 +3175,6 @@ func others() {
 		ch = getrune(finput)
 	}
 
-	fastAppendHelper := strings.ReplaceAll(fastAppendHelperText, "$$", prefix)
-	fmt.Fprint(ftable, fastAppendHelper)
-
 	// copy yaccpar
 	if !lflag {
 		fmt.Fprint(ftable, "\n//line yaccpar:1\n")
@@ -3463,16 +3504,6 @@ func exit(status int) {
 	}
 	os.Exit(status)
 }
-
-const fastAppendHelperText = `
-func $$Iaddr(v any) __yyunsafe__.Pointer {
-	type h struct {
-		t __yyunsafe__.Pointer
-		p __yyunsafe__.Pointer
-	}
-	return (*h)(__yyunsafe__.Pointer(&v)).p
-}
-`
 
 var yaccpar string // will be processed version of yaccpartext: s/$$/prefix/g
 const yaccpartext = `
