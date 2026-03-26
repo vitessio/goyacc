@@ -3064,8 +3064,10 @@ func others() {
 	}
 	arout("Tok2", temp1, c+1)
 
-	// table 3 has everything else
-	var v []int
+	// table 3 has everything else — use direct-indexed array for O(1) lookup
+	// First pass: find min and max key values
+	tok3Min := 0
+	tok3Max := 0
 	for i = 1; i <= ntokens; i++ {
 		j = tokset[i].value
 		if j >= 0 && j < 256 {
@@ -3074,12 +3076,41 @@ func others() {
 		if j >= PRIVATE && j < 256+PRIVATE {
 			continue
 		}
-
-		v = append(v, j, i)
+		if tok3Min == 0 || j < tok3Min {
+			tok3Min = j
+		}
+		if j > tok3Max {
+			tok3Max = j
+		}
 	}
-	v = append(v, 0)
-	arout("Tok3", v, len(v))
-	fmt.Fprintf(ftable, "\n")
+
+	ftable.WriteRune('\n')
+	fmt.Fprintf(ftable, "const %sTok3Base = %d\n\n", prefix, tok3Min)
+	fmt.Fprintf(ftable, "var %sTok3 = [...]int{\n\t", prefix)
+	if tok3Min > 0 {
+		size := tok3Max - tok3Min + 1
+		tok3 := make([]int, size)
+		for i = 1; i <= ntokens; i++ {
+			j = tokset[i].value
+			if j >= 0 && j < 256 {
+				continue
+			}
+			if j >= PRIVATE && j < 256+PRIVATE {
+				continue
+			}
+			tok3[j-tok3Min] = i
+		}
+		for idx, val := range tok3 {
+			if idx%10 != 0 {
+				ftable.WriteRune(' ')
+			}
+			fmt.Fprintf(ftable, "%d,", val)
+			if idx%10 == 9 {
+				fmt.Fprint(ftable, "\n\t")
+			}
+		}
+	}
+	fmt.Fprintf(ftable, "\n}\n")
 
 	// Custom error messages.
 	fmt.Fprintf(ftable, "\n")
@@ -3578,10 +3609,9 @@ func $$lex1(lex $$Lexer, lval *$$SymType) (char, token int) {
 			goto out
 		}
 	}
-	for i := 0; i < len($$Tok3); i += 2 {
-		token = int($$Tok3[i+0])
-		if token == char {
-			token = int($$Tok3[i+1])
+	if idx := char - $$Tok3Base; idx >= 0 && idx < len($$Tok3) {
+		token = int($$Tok3[idx])
+		if token != 0 {
 			goto out
 		}
 	}
