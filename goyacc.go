@@ -130,6 +130,8 @@ const (
 	TYPENAME
 	UNION
 	ERROR
+	LOCATIONS
+	LOCTYPE
 )
 
 const (
@@ -186,6 +188,9 @@ func init() {
 }
 
 var initialstacksize = 16
+
+var locationFlag bool   // true if %locations was declared
+var locationTypeName string // set by %loctype; empty means generate yyLocation
 
 // communication variables between various I/O routines
 var (
@@ -359,6 +364,8 @@ type Resrv struct {
 var resrv = []Resrv{
 	{"binary", BINARY},
 	{"left", LEFT},
+	{"locations", LOCATIONS},
+	{"loctype", LOCTYPE},
 	{"nonassoc", BINARY},
 	{"prec", PREC},
 	{"right", RIGHT},
@@ -470,6 +477,16 @@ outer:
 
 		case ';':
 			// Do nothing.
+
+		case LOCATIONS:
+			locationFlag = true
+
+		case LOCTYPE:
+			if gettok() != IDENTIFIER {
+				errorf("bad %%loctype: expected a type name")
+			}
+			locationTypeName = tokname
+			locationFlag = true
 
 		case START:
 			t = gettok()
@@ -1157,12 +1174,21 @@ func typeinfo() {
 	}
 	fmt.Fprint(ftable, "\n")
 
+	locType := locationTypeName
+	if locationFlag && locType == "" {
+		locType = prefix + "Location"
+		fmt.Fprintf(ftable, "type %s struct {\n\tFirstLine, FirstColumn int\n\tLastLine, LastColumn int\n}\n\n", locType)
+	}
+
 	fmt.Fprintf(ftable, "type %sSymType struct {", prefix)
 	fmt.Fprintf(ftable, "\n\tdata %sData", prefix)
 	if unionPtrSize > 0 {
 		fmt.Fprintf(ftable, "\n\tptrs %sPtrs // GC keepalive for pointers in data", prefix)
 	}
 	fmt.Fprintf(ftable, "\n\tyys int")
+	if locationFlag {
+		fmt.Fprintf(ftable, "\n\tyyloc %s", locType)
+	}
 	fmt.Fprintf(ftable, "\n}\n\n")
 
 	// All types get unsafe-cast accessors + setters.
@@ -1197,6 +1223,24 @@ func typeinfo() {
 			}
 		}
 		fmt.Fprintf(ftable, "}\n")
+	}
+
+	// When we own the location type, generate a default merge function that
+	// users can reassign to customise location propagation.
+	if locationFlag && locationTypeName == "" {
+		lt := prefix + "Location"
+		fmt.Fprintf(ftable, "\nvar %sLocDefault = func(cur *%s, rhs []%sSymType, n int) {\n", prefix, lt, prefix)
+		fmt.Fprintf(ftable, "\tif n > 0 {\n")
+		fmt.Fprintf(ftable, "\t\tcur.FirstLine = rhs[1].yyloc.FirstLine\n")
+		fmt.Fprintf(ftable, "\t\tcur.FirstColumn = rhs[1].yyloc.FirstColumn\n")
+		fmt.Fprintf(ftable, "\t\tcur.LastLine = rhs[n].yyloc.LastLine\n")
+		fmt.Fprintf(ftable, "\t\tcur.LastColumn = rhs[n].yyloc.LastColumn\n")
+		fmt.Fprintf(ftable, "\t} else {\n")
+		fmt.Fprintf(ftable, "\t\tcur.FirstLine = rhs[0].yyloc.LastLine\n")
+		fmt.Fprintf(ftable, "\t\tcur.FirstColumn = rhs[0].yyloc.LastColumn\n")
+		fmt.Fprintf(ftable, "\t\tcur.LastLine = rhs[0].yyloc.LastLine\n")
+		fmt.Fprintf(ftable, "\t\tcur.LastColumn = rhs[0].yyloc.LastColumn\n")
+		fmt.Fprintf(ftable, "\t}\n}\n")
 	}
 }
 
@@ -1608,6 +1652,70 @@ loop:
 				}
 				fmt.Fprintf(fcode, ".%s()", typeset[tok])
 			}
+			continue loop
+
+		case '@':
+			if !locationFlag {
+				fcode.WriteRune(c)
+				continue loop
+			}
+			s := 1
+			c = getrune(finput)
+			if c == '$' {
+				fmt.Fprintf(fcode, "%sVAL.yyloc", prefix)
+				continue loop
+			}
+			if c == '-' {
+				s = -s
+				c = getrune(finput)
+			}
+			j := 0
+			if isdigit(c) {
+				for isdigit(c) {
+					j = j*10 + int(c-'0')
+					c = getrune(finput)
+				}
+				ungetrune(finput, c)
+				j = j * s
+				if j >= max {
+					errorf("Illegal use of @%v", j)
+				}
+			} else if isword(c) || c == '.' {
+				// look for @name or @name@number
+				ungetrune(finput, c)
+				if gettok() != IDENTIFIER {
+					errorf("@ must be followed by an identifier")
+				}
+				tokn := chfind(2, tokname)
+				fnd := -1
+				c = getrune(finput)
+				if c != '@' {
+					ungetrune(finput, c)
+				} else if gettok() != NUMBER {
+					errorf("@ must be followed by number")
+				} else {
+					fnd = numbval
+				}
+				for j = 1; j < max; j++ {
+					if tokn == curprod[j] {
+						fnd--
+						if fnd <= 0 {
+							break
+						}
+					}
+				}
+				if j >= max {
+					errorf("@name or @name@number not found")
+				}
+			} else {
+				fcode.WriteRune('@')
+				if s < 0 {
+					fcode.WriteRune('-')
+				}
+				ungetrune(finput, c)
+				continue loop
+			}
+			fmt.Fprintf(fcode, "%sDollar[%v].yyloc", prefix, j)
 			continue loop
 
 		case '}':
@@ -3175,6 +3283,20 @@ func others() {
 		fmt.Fprint(ftable, "\n//line yaccpar:1\n")
 	}
 
+	// Substitute $$run_loc_default() with location-merging code when %locations
+	// was declared, or remove it otherwise.
+	var locDefaultCode string
+	if locationFlag {
+		p := prefix
+		locDefaultCode = fmt.Sprintf(
+			"\n\t{\n"+
+				"\t\t__rhs := int(%sR2[%snt])\n"+
+				"\t\t%sLocDefault(&%sVAL.yyloc, %sS[%sp:%sp+__rhs+1], __rhs)\n"+
+				"\t}",
+			p, p, p, p, p, p, p)
+	}
+	yaccpar = strings.ReplaceAll(yaccpar, prefix+"run_loc_default()", locDefaultCode)
+
 	parts := strings.SplitN(yaccpar, prefix+"run()", 2)
 	fmt.Fprintf(ftable, "%v", parts[0])
 	ftable.Write(fcode.Bytes())
@@ -3804,6 +3926,7 @@ $$default:
 		$$S = nyys
 	}
 	$$VAL = $$S[$$p+1]
+	$$run_loc_default()
 
 	/* consult goto table to find next state */
 	$$n = int($$R1[$$n])
