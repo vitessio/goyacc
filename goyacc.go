@@ -144,14 +144,20 @@ func ASSOC(i int) int { return i & 3 }
 
 func PLEVEL(i int) int { return (i >> 4) & 0o77 }
 
-func TYPE(i int) int { return (i >> 10) & 0o77 }
+func TYPE(i int) int { return (i >> 10) & 0xFF }
 
 // macros for setting associativity and precedence levels
 func SETASC(i, j int) int { return i | j }
 
 func SETPLEV(i, j int) int { return i | (j << 4) }
 
-func SETTYPE(i, j int) int { return i | (j << 10) }
+func SETTYPE(i, j int) int {
+	if j > 0xFF {
+		fmt.Fprintf(stderr, "goyacc: type value %d too large\n", j)
+		exit(1)
+	}
+	return i | (j << 10)
+}
 
 // I/O descriptors
 var (
@@ -2395,6 +2401,19 @@ func output() {
 	}
 
 	arrayOutColumns("Exca", actions, 2, false)
+
+	// Build a direct index from state to yyExca offset, replacing the linear scan.
+	excaIdx := make([]int, nstate)
+	for i := 0; i < len(actions)-1; i += 2 {
+		if actions[i] == -1 {
+			state := actions[i+1]
+			if state >= 0 && state < nstate {
+				excaIdx[state] = i + 2 // point past the -1,state header
+			}
+		}
+	}
+	arout("ExcaIdx", excaIdx, nstate)
+
 	fmt.Fprintf(ftable, "\n")
 	ftable.WriteRune('\n')
 	fmt.Fprintf(ftable, "const %sPrivate = %v\n", prefix, PRIVATE)
@@ -3045,8 +3064,10 @@ func others() {
 	}
 	arout("Tok2", temp1, c+1)
 
-	// table 3 has everything else
-	var v []int
+	// table 3 has everything else — use direct-indexed array for O(1) lookup
+	// First pass: find min and max key values
+	tok3Min := 0
+	tok3Max := 0
 	for i = 1; i <= ntokens; i++ {
 		j = tokset[i].value
 		if j >= 0 && j < 256 {
@@ -3055,12 +3076,41 @@ func others() {
 		if j >= PRIVATE && j < 256+PRIVATE {
 			continue
 		}
-
-		v = append(v, j, i)
+		if tok3Min == 0 || j < tok3Min {
+			tok3Min = j
+		}
+		if j > tok3Max {
+			tok3Max = j
+		}
 	}
-	v = append(v, 0)
-	arout("Tok3", v, len(v))
-	fmt.Fprintf(ftable, "\n")
+
+	ftable.WriteRune('\n')
+	fmt.Fprintf(ftable, "const %sTok3Base = %d\n\n", prefix, tok3Min)
+	fmt.Fprintf(ftable, "var %sTok3 = [...]int{\n\t", prefix)
+	if tok3Min > 0 {
+		size := tok3Max - tok3Min + 1
+		tok3 := make([]int, size)
+		for i = 1; i <= ntokens; i++ {
+			j = tokset[i].value
+			if j >= 0 && j < 256 {
+				continue
+			}
+			if j >= PRIVATE && j < 256+PRIVATE {
+				continue
+			}
+			tok3[j-tok3Min] = i
+		}
+		for idx, val := range tok3 {
+			if idx%10 != 0 {
+				ftable.WriteRune(' ')
+			}
+			fmt.Fprintf(ftable, "%d,", val)
+			if idx%10 == 9 {
+				fmt.Fprint(ftable, "\n\t")
+			}
+		}
+	}
+	fmt.Fprintf(ftable, "\n}\n")
 
 	// Custom error messages.
 	fmt.Fprintf(ftable, "\n")
@@ -3432,7 +3482,7 @@ var yaccpar string // will be processed version of yaccpartext: s/$$/prefix/g
 const yaccpartext = `
 /*	parser for yacc output	*/
 
-var (
+const (
 	$$Debug        = 0
 	$$ErrorVerbose = false
 )
@@ -3511,13 +3561,10 @@ func $$ErrorMessage(state, lookAhead int) string {
 	}
 
 	if $$Def[state] == -2 {
-		i := 0
-		for $$Exca[i] != -1 || int($$Exca[i+1]) != state {
-			i += 2
-		}
+		i := int($$ExcaIdx[state])
 
 		// Look for tokens that we accept or reduce.
-		for i += 2; $$Exca[i] >= 0; i += 2 {
+		for ; $$Exca[i] >= 0; i += 2 {
 			tok := int($$Exca[i])
 			if tok < TOKSTART || $$Exca[i+1] == 0 {
 				continue
@@ -3562,10 +3609,9 @@ func $$lex1(lex $$Lexer, lval *$$SymType) (char, token int) {
 			goto out
 		}
 	}
-	for i := 0; i < len($$Tok3); i += 2 {
-		token = int($$Tok3[i+0])
-		if token == char {
-			token = int($$Tok3[i+1])
+	if idx := char - $$Tok3Base; idx >= 0 && idx < len($$Tok3) {
+		token = int($$Tok3[idx])
+		if token != 0 {
 			goto out
 		}
 	}
@@ -3659,14 +3705,8 @@ $$default:
 		}
 
 		/* look through exception table */
-		xi := 0
-		for {
-			if $$Exca[xi+0] == -1 && int($$Exca[xi+1]) == $$state {
-				break
-			}
-			xi += 2
-		}
-		for xi += 2; ; xi += 2 {
+		xi := int($$ExcaIdx[$$state])
+		for ; ; xi += 2 {
 			$$n = int($$Exca[xi+0])
 			if $$n < 0 || $$n == $$token {
 				break
