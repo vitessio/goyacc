@@ -2401,6 +2401,19 @@ func output() {
 	}
 
 	arrayOutColumns("Exca", actions, 2, false)
+
+	// Build a direct index from state to yyExca offset, replacing the linear scan.
+	excaIdx := make([]int, nstate)
+	for i := 0; i < len(actions)-1; i += 2 {
+		if actions[i] == -1 {
+			state := actions[i+1]
+			if state >= 0 && state < nstate {
+				excaIdx[state] = i + 2 // point past the -1,state header
+			}
+		}
+	}
+	arout("ExcaIdx", excaIdx, nstate)
+
 	fmt.Fprintf(ftable, "\n")
 	ftable.WriteRune('\n')
 	fmt.Fprintf(ftable, "const %sPrivate = %v\n", prefix, PRIVATE)
@@ -3517,13 +3530,10 @@ func $$ErrorMessage(state, lookAhead int) string {
 	}
 
 	if $$Def[state] == -2 {
-		i := 0
-		for $$Exca[i] != -1 || int($$Exca[i+1]) != state {
-			i += 2
-		}
+		i := int($$ExcaIdx[state])
 
 		// Look for tokens that we accept or reduce.
-		for i += 2; $$Exca[i] >= 0; i += 2 {
+		for ; $$Exca[i] >= 0; i += 2 {
 			tok := int($$Exca[i])
 			if tok < TOKSTART || $$Exca[i+1] == 0 {
 				continue
@@ -3665,14 +3675,8 @@ $$default:
 		}
 
 		/* look through exception table */
-		xi := 0
-		for {
-			if $$Exca[xi+0] == -1 && int($$Exca[xi+1]) == $$state {
-				break
-			}
-			xi += 2
-		}
-		for xi += 2; ; xi += 2 {
+		xi := int($$ExcaIdx[$$state])
+		for ; ; xi += 2 {
 			$$n = int($$Exca[xi+0])
 			if $$n < 0 || $$n == $$token {
 				break
