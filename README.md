@@ -30,8 +30,8 @@ inferred automatically at generation time using `go/packages`. Typed
 accessor and setter methods are generated for each member:
 
 ```go
-func (st *yySymType) exprUnion() Expr { ... }      // getter
-func (st *yySymType) setexpr(v Expr)  { ... }      // setter
+func (st *yySymType) expr() Expr     { ... }      // getter
+func (st *yySymType) setexpr(v Expr) { ... }      // setter
 ```
 
 All reads and writes go through `unsafe.Pointer` casts into `data`,
@@ -39,9 +39,6 @@ eliminating interface boxing (`convTslice`/`convT`) on every grammar
 reduction. The `ptrs` array keeps pointer-containing words visible to
 the GC. `yySymType` can shrink dramatically (e.g. 136 → 40 bytes),
 reducing stack copy cost on every parser push/pop operation.
-
-Both `%union` and `%struct` directives populate the same union; the
-distinction between them no longer affects the generated layout.
 
 ### Fast-append optimization
 
@@ -51,7 +48,7 @@ generated code accesses the underlying slice directly via
 
 ```go
 yySLICE := (*[]Expr)(__yyunsafe__.Pointer(&yyVAL.data))
-*yySLICE = append(*yySLICE, yyDollar[2].exprUnion())
+*yySLICE = append(*yySLICE, yyDollar[2].expr())
 ```
 
 This optimization is always enabled and eliminates per-reduction heap

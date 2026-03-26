@@ -128,7 +128,6 @@ const (
 	START
 	TYPEDEF
 	TYPENAME
-	STRUCT
 	UNION
 	ERROR
 )
@@ -368,7 +367,6 @@ var resrv = []Resrv{
 	{"token", TERM},
 	{"type", TYPEDEF},
 	{"union", UNION},
-	{"struct", STRUCT},
 	{"error", ERROR},
 }
 
@@ -539,9 +537,6 @@ outer:
 			continue
 
 		case UNION:
-			parsetypes()
-
-		case STRUCT:
 			parsetypes()
 
 		case LEFT, BINARY, RIGHT, TERM:
