@@ -74,6 +74,10 @@ type yyLocation struct {
 }
 ```
 
+The names `yyLocation`, `yySymType`, and `yyLocDefault` shown here assume
+the default `yy` prefix. With `-p`/`--prefix`, substitute the chosen prefix
+throughout.
+
 In action code, `@N` and `@$` access the location of the Nth RHS symbol
 and the LHS result, respectively — mirroring how `$N` and `$$` work for
 semantic values. Named references (`@name`, `@name@N`) are also supported.
@@ -90,15 +94,8 @@ expr: expr '+' expr
 ```
 
 Before each action runs, `yyLocDefault` is called to automatically merge
-the RHS span into `@$` (the YYLLOC_DEFAULT equivalent). `yyLocDefault` is
-a package-level function variable; reassign it to customise the merge
-logic:
-
-```go
-yyLocDefault = func(cur *yyLocation, rhs []yySymType, n int) {
-    // custom merge logic
-}
-```
+the RHS span into `@$` (the YYLLOC_DEFAULT equivalent). To customise the
+merge logic, use `%loctype` and supply your own implementation.
 
 Lexers supply location information by setting `lval.yyloc` before
 returning. Shifts copy the full `yySymType`, so token locations land on
@@ -115,10 +112,11 @@ To use a custom location type instead of the generated `yyLocation`, use
 ```
 
 When `%loctype` is used, `yyLocation` and `yyLocDefault` are not generated.
-The user must define `yyLocDefault` with a matching signature:
+The user must define `yyLocDefault` with a matching signature (substitute
+the prefix for `yy` if using `-p`/`--prefix`):
 
 ```go
-var yyLocDefault = func(cur *MyLocation, rhs []yySymType, n int) {
+func yyLocDefault(cur *MyLocation, rhs []yySymType, n int) {
     // ...
 }
 ```

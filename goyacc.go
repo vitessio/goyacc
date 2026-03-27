@@ -1225,11 +1225,11 @@ func typeinfo() {
 		fmt.Fprintf(ftable, "}\n")
 	}
 
-	// When we own the location type, generate a default merge function that
-	// users can reassign to customise location propagation.
+	// When we own the location type, generate a default merge function.
+	// Users who need custom merge logic should use %loctype instead.
 	if locationFlag && locationTypeName == "" {
 		lt := prefix + "Location"
-		fmt.Fprintf(ftable, "\nvar %sLocDefault = func(cur *%s, rhs []%sSymType, n int) {\n", prefix, lt, prefix)
+		fmt.Fprintf(ftable, "\nfunc %sLocDefault(cur *%s, rhs []%sSymType, n int) {\n", prefix, lt, prefix)
 		fmt.Fprintf(ftable, "\tif n > 0 {\n")
 		fmt.Fprintf(ftable, "\t\tcur.FirstLine = rhs[1].yyloc.FirstLine\n")
 		fmt.Fprintf(ftable, "\t\tcur.FirstColumn = rhs[1].yyloc.FirstColumn\n")
