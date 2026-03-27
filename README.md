@@ -93,7 +93,6 @@ To use a custom location type instead of the generated `yyLocation`, use
 `%loctype`:
 
 ```yacc
-%locations
 %loctype MyLocation
 ```
 

@@ -186,7 +186,7 @@ func init() {
 
 var initialstacksize = 16
 
-var locationFlag bool   // true if %locations was declared
+var locationFlag bool       // true when location tracking is enabled (%locations or %loctype)
 var locationTypeName string // set by %loctype; empty means generate yyLocation
 
 // communication variables between various I/O routines
