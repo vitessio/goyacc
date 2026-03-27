@@ -1598,7 +1598,7 @@ loop:
 				}
 				ungetrune(finput, c)
 				j = j * s
-				if j >= max {
+				if j <= 0 || j >= max {
 					errorf("Illegal use of $%v", j)
 				}
 			} else if isword(c) || c == '.' {
@@ -1677,7 +1677,7 @@ loop:
 				}
 				ungetrune(finput, c)
 				j = j * s
-				if j >= max {
+				if j <= 0 || j >= max {
 					errorf("Illegal use of @%v", j)
 				}
 			} else if isword(c) || c == '.' {
