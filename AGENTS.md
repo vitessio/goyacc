@@ -41,9 +41,7 @@ The upstream source is [`cmd/goyacc`](https://cs.opensource.google/go/x/tools/+/
 
 ### Enhancements over standard goyacc
 
-**Discriminated `unsafe.Pointer` union** (`%union` / `%struct`): `yySymType` holds a `data [N]uintptr` array (sized to the largest member) plus a `ptrs [M]unsafe.Pointer` GC-keepalive array. All member types are stored/read via `unsafe.Pointer` casts, eliminating interface boxing. Array sizes and pointer-word offsets are inferred automatically at generation time via `go/packages` (`inferUnionLayout` in `unionsize.go`). Typed getter (`<member>Union()`) and setter (`set<member>()`) methods are generated for each member. Only `%union` is supported; `%struct` has been removed.
-
-**Fast-append**: For rules of the form `$$ = append($1, $2)`, the generated code uses `unsafe.Pointer(&yyVAL.data)` directly to avoid a slice-header allocation per reduction. Always enabled.
+**Discriminated `unsafe.Pointer` union** (`%union`): `yySymType` holds a `data [N]uintptr` array (sized to the largest member) plus a `ptrs [M]unsafe.Pointer` GC-keepalive array. All member types are stored/read via `uintptr` casts, eliminating interface boxing. Array sizes and pointer-word offsets (for the GC-keepalive array) are inferred automatically at generation time via `go/packages` (`inferUnionLayout` in `unionsize.go`). Typed getter (`<member>()`) and setter (`set<member>()`) methods are generated for each member.
 
 **Custom error messages**: `// error: "message"` comments in grammar rules are collected into a lookup table keyed by (state, token) pair and emitted into the generated parser.
 
