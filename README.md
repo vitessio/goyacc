@@ -47,6 +47,65 @@ context-specific parse error messages. The generated parser looks up
 error messages by (state, token) pairs and falls back to listing
 expected tokens.
 
+### Location tracking (`%locations`)
+
+Supports Bison-style source location tracking via a `%locations` directive.
+When declared, each symbol on the parse stack carries a `yyloc` field of
+type `yyLocation`:
+
+```go
+type yyLocation struct {
+    FirstLine, FirstColumn int
+    LastLine,  LastColumn  int
+}
+```
+
+The names `yyLocation`, `yySymType`, and `yyLocDefault` shown here assume
+the default `yy` prefix. With `-p`/`--prefix`, substitute the chosen prefix
+throughout.
+
+In action code, `@N` and `@$` access the location of the Nth RHS symbol
+and the LHS result, respectively — mirroring how `$N` and `$$` work for
+semantic values. Named references (`@name`, `@name@N`) are also supported.
+
+```yacc
+expr: expr '+' expr
+    {
+        $$ = $1 + $3
+        @$.FirstLine   = @1.FirstLine
+        @$.FirstColumn = @1.FirstColumn
+        @$.LastLine    = @3.LastLine
+        @$.LastColumn  = @3.LastColumn
+    }
+```
+
+Before each action runs, `yyLocDefault` is called to automatically merge
+the RHS span into `@$` (the YYLLOC_DEFAULT equivalent). To customise the
+merge logic, use `%loctype` and supply your own implementation.
+
+Lexers supply location information by setting `lval.yyloc` before
+returning. Shifts copy the full `yySymType`, so token locations land on
+the stack automatically.
+
+#### Custom location type (`%loctype`)
+
+To use a custom location type instead of the generated `yyLocation`, use
+`%loctype`:
+
+```yacc
+%loctype MyLocation
+```
+
+When `%loctype` is used, `yyLocation` and `yyLocDefault` are not generated.
+The user must define `yyLocDefault` with a matching signature (substitute
+the prefix for `yy` if using `-p`/`--prefix`):
+
+```go
+func yyLocDefault(cur *MyLocation, rhs []yySymType, n int) {
+    // ...
+}
+```
+
 ### POSIX-style flags
 
 Uses [pflag](https://github.com/spf13/pflag) for command-line parsing,
@@ -99,8 +158,8 @@ This tool's lineage:
 
 1. **Inferno `iyacc/yacc.c`** — the original C implementation
 2. **Go `cmd/yacc`** — ported to Go by the Go Authors
-3. **This fork** — enhanced by the Vitess Authors with typed unions and
-   custom error messages
+3. **This fork** — enhanced by the Vitess Authors with typed unions, 
+   custom error messages, and location tracking
 
 ## License
 
