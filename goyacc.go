@@ -48,12 +48,9 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -383,7 +380,7 @@ type Error struct {
 	msg    string
 }
 
-var customErrors []Error
+var errors []Error
 
 type Row struct {
 	actions       []int
@@ -514,7 +511,7 @@ outer:
 			if gettok() != IDENTIFIER {
 				errorf("bad syntax in %%error")
 			}
-			customErrors = append(customErrors, Error{lno, tokens, tokname})
+			errors = append(errors, Error{lno, tokens, tokname})
 
 		case TYPEDEF:
 			t = gettok()
@@ -699,20 +696,12 @@ outer:
 
 			var act bytes.Buffer
 			var unionType, unionMember string
-			var usedFastAppend bool
-			cpyact(&act, curprod, mem, &unionType, &unionMember, &usedFastAppend)
+			cpyact(&act, curprod, mem, &unionType, &unionMember)
 
 			if unionType != "" {
 				fmt.Fprintf(fcode, "\n\t\tvar %sLOCAL %s", prefix, unionType)
 			}
 			fcode.Write(act.Bytes())
-			if usedFastAppend {
-				// After fast-append, the slice data pointer may have changed.
-				// Update ptrs[0] by reading the first word of the data array
-				// as unsafe.Pointer. We use &data (not data[0]) to avoid
-				// a uintptr→unsafe.Pointer conversion that checkptr rejects.
-				fmt.Fprintf(fcode, "\n\t\t%sVAL.ptrs[0] = *(*__yyunsafe__.Pointer)(__yyunsafe__.Pointer(&%sVAL.data))", prefix, prefix)
-			}
 			if unionType != "" {
 				fmt.Fprintf(fcode, "\n\t\t%sVAL.set%s(%sLOCAL)", prefix, unionMember, prefix)
 			}
@@ -1467,9 +1456,7 @@ l1:
 	return nl
 }
 
-var fastAppendRe = regexp.MustCompile(`\s+append\(\$[$1],`)
-
-func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *string, unionMember *string, usedFastAppend *bool) {
+func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *string, unionMember *string) {
 	if ntypes == 0 {
 		fmt.Fprintf(fcode, "%sVAL", prefix)
 		return
@@ -1485,7 +1472,6 @@ func cpyyvalaccess(fcode *bytes.Buffer, curprod []int, tok int, unionType *strin
 
 	var buf bytes.Buffer
 	lvalue := false
-	fastAppend := false
 
 loop:
 	for {
@@ -1497,23 +1483,6 @@ loop:
 
 		case '=':
 			lvalue = true
-			if *unionType == "" {
-				peek, err := finput.Peek(16)
-				if err != nil && !errors.Is(err, io.EOF) {
-					errorf("failed to scan forward: %v", err)
-				}
-				match := fastAppendRe.Find(peek)
-				if len(match) > 0 {
-					fastAppend = true
-					for range match {
-						_ = getrune(finput)
-					}
-				} else {
-					buf.WriteRune(c)
-				}
-				break loop
-			}
-
 			buf.WriteRune(c)
 			break loop
 
@@ -1523,13 +1492,7 @@ loop:
 		}
 	}
 
-	if fastAppend {
-		fmt.Fprintf(fcode, "\t%sSLICE := (*%s)(__yyunsafe__.Pointer(&%sVAL.data))\n", prefix, ti.typename, prefix)
-		fmt.Fprintf(fcode, "\t*%sSLICE = append(*%sSLICE, ", prefix, prefix)
-		if usedFastAppend != nil {
-			*usedFastAppend = true
-		}
-	} else if lvalue {
+	if lvalue {
 		fmt.Fprintf(fcode, "%sLOCAL", prefix)
 		*unionType = ti.typename
 		if unionMember != nil {
@@ -1544,7 +1507,7 @@ loop:
 }
 
 // copy action to the next ; or closing }
-func cpyact(fcode *bytes.Buffer, curprod []int, max int, unionType *string, unionMember *string, usedFastAppend *bool) {
+func cpyact(fcode *bytes.Buffer, curprod []int, max int, unionType *string, unionMember *string) {
 	if !lflag {
 		fmt.Fprintf(fcode, "\n//line %v:%v", infile, lineno)
 	}
@@ -1583,7 +1546,7 @@ loop:
 				c = getrune(finput)
 			}
 			if c == '$' {
-				cpyyvalaccess(fcode, curprod, tok, unionType, unionMember, usedFastAppend)
+				cpyyvalaccess(fcode, curprod, tok, unionType, unionMember)
 				continue loop
 			}
 			if c == '-' {
@@ -2471,7 +2434,7 @@ func output() {
 	}
 	var actions []int
 
-	if len(customErrors) > 0 {
+	if len(errors) > 0 {
 		stateTable = make([]Row, nstate)
 	}
 
@@ -2693,7 +2656,7 @@ func wrstate(i int) {
 	var j0, j1, u int
 	var pp, qq int
 
-	if len(customErrors) > 0 {
+	if len(errors) > 0 {
 		actions := slices.Clone(temp1)
 		defaultAction := ERRCODE
 		if lastred != 0 {
@@ -3264,7 +3227,7 @@ func others() {
 	fmt.Fprintf(ftable, "\ttoken int\n")
 	fmt.Fprintf(ftable, "\tmsg   string\n")
 	fmt.Fprintf(ftable, "}{\n")
-	for _, error := range customErrors {
+	for _, error := range errors {
 		lineno = error.lineno
 		state, token := runMachine(error.tokens)
 		fmt.Fprintf(ftable, "\t{%v, %v, %s},\n", state, token, error.msg)
