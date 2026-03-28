@@ -139,7 +139,7 @@ goyacc [flags] grammar.y
 |------|-------|---------|-------------|
 | `--output` | `-o` | `y.go` | Parser output file |
 | `--prefix` | `-p` | `yy` | Name prefix for generated identifiers |
-| `--verbose-output` | `-v` | `y.output` | Verbose parsing tables output file |
+| `--verbose-output` | `-v` | `` | Verbose parsing tables output file (disabled by default) |
 | `--disable-line-directives` | `-l` | `false` | Disable line directives in generated code |
 
 ### Example
