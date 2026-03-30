@@ -180,7 +180,7 @@ var (
 func init() {
 	pflag.StringVarP(&oflag, "output", "o", "y.go", "parser output")
 	pflag.StringVarP(&prefix, "prefix", "p", "yy", "name prefix to use in generated code")
-	pflag.StringVarP(&vflag, "verbose-output", "v", "y.output", "create parsing tables")
+	pflag.StringVarP(&vflag, "verbose-output", "v", "", "create parsing tables")
 	pflag.BoolVarP(&lflag, "disable-line-directives", "l", false, "disable line directives")
 }
 
